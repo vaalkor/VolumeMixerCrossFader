@@ -19,6 +19,7 @@ namespace CrossMixer
         private List<AudioSession> _audioSessions = new List<AudioSession>();
         private AudioSession _firstChannel = null;
         private AudioSession _secondChannel = null;
+        private bool _isRemovingChannel = false;
 
         public VolumeMixerCrossFader()
         {
@@ -51,6 +52,7 @@ namespace CrossMixer
 
                     if (!_audioSessions.Any(x => x.Control.BasePtr == control.BasePtr) && !_processIgnoreList.Contains(control.Process.ProcessName))
                     {
+                        control.StateChanged += Control_StateChanged;
                         control.SessionDisconnected += Control_SessionDisconnected;
                         control.SimpleVolumeChanged += Control_SimpleVolumeChanged;
                         _audioSessions.Add(new AudioSession(control, volume));
@@ -64,39 +66,7 @@ namespace CrossMixer
             }
         }
 
-        private void RefreshUI()
-        {
-            if (_firstChannel == null)
-            {
-                firstChannelDropdown.SelectedIndex = -1;
-                firstChannelDisplayNameLabel.Text = "<First channel unselected>";
-                firstChannelVolumeBar.Value = 50;
-            }
-            else
-            {
-                firstChannelVolumeBar.Value = (int)Math.Ceiling(_firstChannel.Volume.MasterVolume * 100);
-            }
-
-            if (_secondChannel == null)
-            {
-                secondChannelDropdown.SelectedIndex = -1;
-                secondChannelDisplayNameLabel.Text = "<Second channel unselected>";
-                secondChannelVolumeBar.Value = 50;
-            }
-            else
-            {
-                secondChannelVolumeBar.Value = (int)Math.Ceiling(_secondChannel.Volume.MasterVolume * 100);
-            }
-
-            if (_firstChannel == null || _secondChannel == null) crossFaderBar.Value = 50;
-        }
-
-        private void Control_SimpleVolumeChanged(object sender, AudioSessionSimpleVolumeChangedEventArgs e)
-        {
-            BeginInvoke(new MethodInvoker(() => RefreshUI()));
-        }
-
-        private void Control_SessionDisconnected(object sender, AudioSessionDisconnectedEventArgs e)
+        private void HandleDisconnectedSessions()
         {
             using (var sessionEnumerator = _audioSessionManager.GetSessionEnumerator())
             {
@@ -113,7 +83,57 @@ namespace CrossMixer
                 }
             }
 
-            RefreshUI();
+            BeginInvoke(new MethodInvoker(() => RefreshUI()));
+        }
+
+        private void Control_SessionDisconnected(object sender, AudioSessionDisconnectedEventArgs e)
+        {
+            HandleDisconnectedSessions();
+        }
+
+        private void Control_StateChanged(object sender, AudioSessionStateChangedEventArgs e)
+        {
+            HandleDisconnectedSessions();
+        }
+
+        private void RefreshUI()
+        {
+            if (_firstChannel == null)
+            {
+                _isRemovingChannel = true;
+                firstChannelDropdown.DataSource = _audioSessions.Select((x, idx) => new ListElement(x.Control.Process.ProcessName, idx)).ToArray();
+                firstChannelDropdown.SelectedIndex = -1;
+                firstChannelDisplayNameLabel.Text = "<First channel unselected>";
+                firstChannelVolumeBar.Value = 50;
+                _isRemovingChannel = false;
+            }
+            else
+            {
+                firstChannelVolumeBar.Value = (int)Math.Ceiling(_firstChannel.Volume.MasterVolume * 100);
+            }
+
+            if (_secondChannel == null)
+            {
+                _isRemovingChannel = true;
+                secondChannelDropdown.DataSource = _audioSessions.Select((x, idx) => new ListElement(x.Control.Process.ProcessName, idx)).ToArray();
+                secondChannelDropdown.SelectedIndex = -1;
+                secondChannelDisplayNameLabel.Text = "<Second channel unselected>";
+                secondChannelVolumeBar.Value = 50;
+                _isRemovingChannel = false;
+            }
+            else
+            {
+                secondChannelVolumeBar.Value = (int)Math.Ceiling(_secondChannel.Volume.MasterVolume * 100);
+            }
+
+            if (_firstChannel == null || _secondChannel == null) crossFaderBar.Value = 50;
+
+
+        }
+
+        private void Control_SimpleVolumeChanged(object sender, AudioSessionSimpleVolumeChangedEventArgs e)
+        {
+            BeginInvoke(new MethodInvoker(() => RefreshUI()));
         }
 
         private void channelDropdown_KeyPressHandler(object sender, KeyPressEventArgs e)
@@ -123,7 +143,7 @@ namespace CrossMixer
 
         private void firstChannelDropdown_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (firstChannelDropdown.SelectedIndex == -1) return;
+            if (firstChannelDropdown.SelectedIndex == -1 || _isRemovingChannel) return;
             _firstChannel = _audioSessions[firstChannelDropdown.SelectedIndex];
             firstChannelDisplayNameLabel.Text = _audioSessions[firstChannelDropdown.SelectedIndex].Control.Process.ProcessName;
             firstChannelVolumeBar.Value = (int)Math.Ceiling(_audioSessions[firstChannelDropdown.SelectedIndex].Volume.MasterVolume * 100);
@@ -136,7 +156,7 @@ namespace CrossMixer
 
         private void secondChannelDropdown_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (secondChannelDropdown.SelectedIndex == -1) return;
+            if (secondChannelDropdown.SelectedIndex == -1 || _isRemovingChannel) return;
             _secondChannel = _audioSessions[secondChannelDropdown.SelectedIndex];
             secondChannelDisplayNameLabel.Text = _audioSessions[secondChannelDropdown.SelectedIndex].Control.Process.ProcessName;
             secondChannelVolumeBar.Value = (int)Math.Ceiling(_audioSessions[secondChannelDropdown.SelectedIndex].Volume.MasterVolume * 100);
