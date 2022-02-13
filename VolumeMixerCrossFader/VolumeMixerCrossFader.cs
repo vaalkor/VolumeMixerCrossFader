@@ -29,7 +29,8 @@ namespace CrossMixer
                 _audioSessionManager = GetDefaultAudioSessionManager2(DataFlow.Render);
                 GetAudioSessions();
 
-                BeginInvoke(new MethodInvoker(() => {
+                BeginInvoke(new MethodInvoker(() =>
+                {
                     firstChannelDropdown.DataSource = _audioSessions.Select((x, idx) => new ListElement(x.Control.Process.ProcessName, idx)).ToArray();
                     secondChannelDropdown.DataSource = _audioSessions.Select((x, idx) => new ListElement(x.Control.Process.ProcessName, idx)).ToArray();
                     firstChannelDropdown.SelectedIndex = _audioSessions.FindIndex(x => x.Control.Process.ProcessName.Equals(FIRST_CHANNEL_DEFAULT_PROCESS, StringComparison.OrdinalIgnoreCase));
@@ -127,7 +128,7 @@ namespace CrossMixer
             firstChannelDisplayNameLabel.Text = _audioSessions[firstChannelDropdown.SelectedIndex].Control.Process.ProcessName;
             firstChannelVolumeBar.Value = (int)Math.Ceiling(_audioSessions[firstChannelDropdown.SelectedIndex].Volume.MasterVolume * 100);
 
-            if (_firstChannel != null && _secondChannel != null) 
+            if (_firstChannel != null && _secondChannel != null)
             {
                 crossFaderBar.Value = (int)Math.Ceiling(100 - 100 * _firstChannel.Volume.MasterVolume);
             }
@@ -180,21 +181,6 @@ namespace CrossMixer
             }
         }
 
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                if (components != null)
-                {
-                    components.Dispose();
-                }
-
-                _audioSessionManager.Dispose();
-            }
-
-            base.Dispose(disposing);
-        }
-
         private void crossFaderBar_ValueChanged(object sender, EventArgs e)
         {
             if (_firstChannel == null || _secondChannel == null) crossFaderBar.Value = 50;
@@ -222,6 +208,25 @@ namespace CrossMixer
 
             _firstChannel.Volume.MasterVolume = 1f - crossFaderBar.Value / 100f;
             _secondChannel.Volume.MasterVolume = crossFaderBar.Value / 100f;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (components != null)
+                {
+                    components.Dispose();
+                }
+
+                _audioSessionManager.Dispose();
+                foreach (var session in _audioSessions)
+                {
+                    session.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 }
