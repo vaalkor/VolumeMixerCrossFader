@@ -13,6 +13,8 @@ namespace CrossMixer
     {
         private static readonly string FIRST_CHANNEL_DEFAULT_PROCESS = "chrome";
         private static readonly string SECOND_CHANNEL_DEFAULT_PROCESS = "spotify";
+        private static readonly int AUTO_FADE_INTERVAL_MS = 16;
+        private static readonly int AUTO_FADE_INCREMENT = 1;
 
         private string[] _processIgnoreList = { "Idle" };
         private AudioSessionManager2 _audioSessionManager;
@@ -20,6 +22,10 @@ namespace CrossMixer
         private AudioSession _firstChannel = null;
         private AudioSession _secondChannel = null;
         private bool _isRemovingChannel = false;
+        private bool _isAutoFading = false;
+        private int _autoFadeTargetVolume = 0;
+        private readonly object _fadeLock = new object();
+        
 
         public VolumeMixerCrossFader()
         {
@@ -30,13 +36,13 @@ namespace CrossMixer
                 _audioSessionManager = GetDefaultAudioSessionManager2(DataFlow.Render);
                 GetAudioSessions();
 
-                BeginInvoke(new MethodInvoker(() =>
+                Invoke(() =>
                 {
                     firstChannelDropdown.DataSource = _audioSessions.Select((x, idx) => new ListElement(x.Control.Process.ProcessName, idx)).ToArray();
                     secondChannelDropdown.DataSource = _audioSessions.Select((x, idx) => new ListElement(x.Control.Process.ProcessName, idx)).ToArray();
                     firstChannelDropdown.SelectedIndex = _audioSessions.FindIndex(x => x.Control.Process.ProcessName.Equals(FIRST_CHANNEL_DEFAULT_PROCESS, StringComparison.OrdinalIgnoreCase));
                     secondChannelDropdown.SelectedIndex = _audioSessions.FindIndex(x => x.Control.Process.ProcessName.Equals(SECOND_CHANNEL_DEFAULT_PROCESS, StringComparison.OrdinalIgnoreCase));
-                }));
+                });
             });
         }
 
@@ -83,7 +89,7 @@ namespace CrossMixer
                 }
             }
 
-            BeginInvoke(new MethodInvoker(() => RefreshUI()));
+            Invoke(() => RefreshUI());
         }
 
         private void Control_SessionDisconnected(object sender, AudioSessionDisconnectedEventArgs e)
@@ -126,14 +132,14 @@ namespace CrossMixer
                 secondChannelVolumeBar.Value = (int)Math.Ceiling(_secondChannel.Volume.MasterVolume * 100);
             }
 
-            if (_firstChannel == null || _secondChannel == null) crossFaderBar.Value = 50;
-
+            if (_firstChannel == null || _secondChannel == null) 
+                crossFaderBar.Value = 50;
 
         }
 
         private void Control_SimpleVolumeChanged(object sender, AudioSessionSimpleVolumeChangedEventArgs e)
         {
-            BeginInvoke(new MethodInvoker(() => RefreshUI()));
+            Invoke(() => RefreshUI());
         }
 
         private void channelDropdown_KeyPressHandler(object sender, KeyPressEventArgs e)
@@ -203,19 +209,24 @@ namespace CrossMixer
 
         private void crossFaderBar_ValueChanged(object sender, EventArgs e)
         {
-            if (_firstChannel == null || _secondChannel == null) crossFaderBar.Value = 50;
+            if (_firstChannel == null || _secondChannel == null) 
+                crossFaderBar.Value = 50;
         }
 
         private void firstChannelVolumeBar_Scroll(object sender, EventArgs e)
         {
-            if (_firstChannel != null) _firstChannel.Volume.MasterVolume = firstChannelVolumeBar.Value / 100f;
-            else firstChannelVolumeBar.Value = 50;
+            if (_firstChannel != null) 
+                _firstChannel.Volume.MasterVolume = firstChannelVolumeBar.Value / 100f;
+            else 
+                firstChannelVolumeBar.Value = 50;
         }
 
         private void secondChannelVolumeBar_Scroll(object sender, EventArgs e)
         {
-            if (_secondChannel != null) _secondChannel.Volume.MasterVolume = secondChannelVolumeBar.Value / 100f;
-            else secondChannelVolumeBar.Value = 50;
+            if (_secondChannel != null) 
+                _secondChannel.Volume.MasterVolume = secondChannelVolumeBar.Value / 100f;
+            else 
+                secondChannelVolumeBar.Value = 50;
         }
 
         private void crossFaderBar_Scroll(object sender, EventArgs e)
@@ -247,6 +258,79 @@ namespace CrossMixer
             }
 
             base.Dispose(disposing);
+        }
+
+        private void autoFadeButton_MouseClick(object sender, EventArgs e)
+        {
+            if (_firstChannel == null || _secondChannel == null)
+                return;
+
+            lock (_fadeLock)
+            {
+                if (_isAutoFading)
+                    StopAutoFade();
+                else
+                    StartAutoFade();
+            }
+        }
+
+        private void StopAutoFade()
+        {
+            autoFadeButton.Text = "Auto Fade";
+            _isAutoFading = false;
+        }
+
+        private void StartAutoFade()
+        {
+            if (crossFaderBar.Value == 50)
+                return;
+
+            _autoFadeTargetVolume = crossFaderBar.Value < 50 ? 100 : 0 ;
+
+            autoFadeButton.Text = "Stop Fade";
+            _isAutoFading = true;
+            Task.Run(() => PerformAutoFade());
+        }
+
+        private async Task PerformAutoFade()
+        {
+            while (true)
+            {
+                lock (_fadeLock)
+                {
+                    if (!_isAutoFading)
+                        return;
+                }
+
+                Invoke(() => {
+                    lock (_fadeLock)
+                    {
+                        if ((_firstChannel == null || _secondChannel == null) || crossFaderBar.Value == _autoFadeTargetVolume)
+                        {
+                            StopAutoFade();
+                            return;
+                        }
+
+                        var targetValue = _autoFadeTargetVolume > crossFaderBar.Value ? crossFaderBar.Value + AUTO_FADE_INCREMENT : crossFaderBar.Value - AUTO_FADE_INCREMENT;
+                        crossFaderBar.Value = Clamp(targetValue, 0, 100);
+                        crossFaderBar_Scroll(null, null);
+                    }
+                });
+
+                await Task.Delay(AUTO_FADE_INTERVAL_MS);
+            }
+        }
+
+        private int Clamp(int value, int minValue, int maxValue)
+        {
+            if (value < minValue) return minValue;
+            if (value > maxValue) return maxValue;
+            return value;
+        }
+
+        private void Invoke(Action action)
+        {
+            BeginInvoke(new MethodInvoker(() => action()));
         }
     }
 }
